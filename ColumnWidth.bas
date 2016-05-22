@@ -19,13 +19,6 @@ Option Base 1
 ' adding international sizes would be simple.
 
 
-
-Sub test()
-Dim aRange As Range
-Set aRange = Selection
-Debug.Print aRange.Width
-End Sub
-
 ' ===== FormatToPrint =========================================================
 ' This is the sub to call. Programmed into a Quick Access Toolbar button and a
 ' keyboard shortcut (PC: Ctrl+Shift+F).
@@ -33,13 +26,19 @@ End Sub
 Public Sub FormatToPrint()
 Attribute FormatToPrint.VB_Description = "Optimize column width and other page settings to print."
 Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
-'
-
-    ' ----- WHAT PAGE SIZES CAN WE USE? -----------------------------------
+    ' ----- WHAT PAGE SIZES CAN WE USE? ---------------------------------------
     Dim availPageSizes() As Variant
-    ' Add error handling in case no paper sizes returned
-    availPageSizes = GetPaperSizes(thisSheet)
+    ' Add error handling at some point if no paper sizes returned
+    availPageSizes = GetPaperSizes(ActiveSheet)
 
+    ' ----- RUN ADJUSTER ------------------------------------------------------
+    Dim strEndMsg As String
+    If Adjuster(availPageSizes()) = False Then
+        strEndMsg = "Sorry, we couldn't fit your report. :("
+    Else
+        strEndMsg = "SUCCESS: This report is ready to print!"
+    End If
+    MsgBox strEndMsg
 End Sub
 
 ' ===== Adjuster ==============================================================
@@ -82,9 +81,9 @@ Public Function Adjuster(PageSizes() As Variant) As Boolean
     Dim origPaperSize As XlPaperSize
     Dim origLeftMargin As Double
     Dim origRightMargin As Double
-    Dim origColumnWidths(1 To lngColumns) As Variant
+    Dim origColumnWidths() As Variant
     Dim Z As Long
-    
+    ReDim origColumnWidths(1 To lngColumns)
     With rngFitColumns
         For Z = 1 To lngColumns
             origColumnWidths(Z) = .Cells(1, Z).ColumnWidth
