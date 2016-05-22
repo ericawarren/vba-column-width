@@ -19,6 +19,13 @@ Option Base 1
 ' adding international sizes would be simple.
 
 
+
+Sub test()
+Dim aRange As Range
+Set aRange = Selection
+Debug.Print aRange.Width
+End Sub
+
 ' ===== FormatToPrint =========================================================
 ' This is the sub to call. Programmed into a Quick Access Toolbar button and a
 ' keyboard shortcut (PC: Ctrl+Shift+F).
@@ -54,7 +61,7 @@ Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
         ' ----- BASIC FORMATTING ----------------------------------------------
         ' Verdana is a common font that looks good small
         ' Should add error handling in case it's missing, though
-        rngFitColumns.Font.Name = "Verdana"
+        rngFitColumns.Font.Name = "Arial"
         
         ' Landscape almost always better fit, right?
         thisSheet.PageSetup.Orientation = xlLandscape
@@ -71,19 +78,22 @@ Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
 
         Do
             lngPagesWide = lngPagesWide + 1
-            For A = 10 To 6 Step -1
-                rngFitColumns.Font.Size = A
-                For B = LBound(pageSizes) To UBound(pageSizes)
-                    thisSheet.PageSetup.PaperSize = pageSizes(B)
+            For B = LBound(pageSizes) To UBound(pageSizes)
+                thisSheet.PageSetup.PaperSize = pageSizes(B)
+                For A = 10 To 4 Step -1
+                    rngFitColumns.Font.Size = A
                     For C = 1 To 2
                         lngMargins = Application.InchesToPoints(1 / C)
                         thisSheet.PageSetup.LeftMargin = lngMargins / 2
                         thisSheet.PageSetup.RightMargin = lngMargins / 2
                         blnDone = FitColumns(rngFitColumns, lngPagesWide)
+                        If blnDone = True Then
+                            Exit Do
+                        End If
                     Next C
-                Next B
-            Next A
-        Loop Until blnDone = True Or lngPagesWide = 4
+                Next A
+            Next B
+        Loop While lngPagesWide < 4
         ' 4 pages wide seems like as good a place to give up as any
 
         ' ----- OTHER PAGE SETUP ----------------------------------------------
@@ -180,7 +190,9 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
             ' May need to add error handling for 0 columns? Or is just fail OK?
             If ColumnCollect.Count > 0 Then
                 ' Record current average column width
+                ' Must be multiple of 6, see FUN STORY below
                 lngStartAvgColW = lngAvailWidth / ColumnCollect.Count
+                lngStartAvgColW = lngStartAvgColW - (lngStartAvgColW Mod 6)
                 
                 ' Remove any columns already smaller than average
                 For Each rngCheckColumn In ColumnCollect
@@ -191,13 +203,10 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
                     End If
                 Next
 
-
                 ' Re-calculate average col width (rm cols already < average)
                 lngAvgColumnW = lngAvailWidth / ColumnCollect.Count
-                Debug.Print "Loop " & dCount & ": " & lngAvgColumnW
-                If lngAvgColumnW > 108 Then
-                    Stop
-                End If
+                lngAvgColumnW = lngAvgColumnW - (lngAvgColumnW Mod 6)
+
                 ' Check if average is at least as large as the minimum we set
                 If lngAvgColumnW < lngMinColumnW Then
                 ' If not, function is a failure
@@ -214,19 +223,46 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
                     End If
                 End If
             End If
-        Loop Until blnStop = True
+        Loop Until blnStop = True Or dCount = 10
     Else
         blnSuccess = True
     End If
 
-'   ----- TEST IF BEST COLUMN WIDTH WAS A SUCCESS -----------------------------
-    ' If autofit along was ok, dCount = 0 and we don't need to change anything
-    If blnSuccess = True And dCount > 0 Then
-    ' Set col width of all remaining too-wide columns to average
+    ' ----- FIX COLUMN WIDTH IF IT WAS A SUCCESS ------------------------------
+    ' If autofit alone was ok, dCount = 0 and we don't need to change anything
+    If blnSuccess = True And dCount > 0 Then ' set column width
+    
+' ----- FUN STORY! --------------------------------------------------------
+' The Range.Width property returns width in points, which is good because we're
+' calculating for print. HOWEVER, Range.Width is a read-only property! We must
+' use Range.ColumnWidth to make changes. But it uses zero-width units. That is,
+' 1 unit of .ColumnWidth is the width needed for 1 zero character of the current
+' Normal style font and size. (Becasue no one ever prints spreadsheets?) You'd
+' think an easy solution would be (goalPoints / Range.Width) * Range.ColumnWidth
+' but think again! Excel will adjust the value you give .ColumnWidth sometimes
+'(I think something to do with using whole pixels). Sometimes it can be REALLY
+' far off, but the closer you are to your goal width the more accurate it is.
+' In fact, if your goal width is a multiple of 6 (in points), it will always
+' get to that value after ~3 iterations. Hence the need for the junk below:
+
         If ColumnCollect.Count > 0 Then
             Dim rngFinalColumn As Range
+            Dim differencePoints As Single
+            Dim B As Long
+            
             For Each rngFinalColumn In ColumnCollect
-                rngFinalColumn.Width = lngAvgColumnW
+                B = 0
+                Do
+                    B = B + 1
+                    rngFinalColumn.ColumnWidth = (lngAvgColumnW / _
+                        rngFinalColumn.Width) * rngFinalColumn.ColumnWidth
+                    ' abs() in case we want to change stopping test to < 1
+                    ' at some point (if need more exact than multiple of 6 pts)
+                    differencePoints = Abs(lngAvgColumnW - rngFinalColumn.Width)
+                Loop Until differencePoints = 0 Or B = 10
+                ' B-counter just as a fail-safe to prevent infinite loops,
+                ' though if it can't reach our intended width it will end
+                ' up < 1 point away which isn't such a big deal.
             Next rngFinalColumn
         End If
         Set rngColumn = Nothing
@@ -238,7 +274,6 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
         fitRange.Rows.AutoFit
     
     End If
-    Debug.Print "--- END FitColumns: " & blnSuccess
     Set ColumnCollect = Nothing
     
     ' ----- RETURN IF THIS WAS A SUCCESS --------------------------------------
