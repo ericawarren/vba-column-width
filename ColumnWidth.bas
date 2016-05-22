@@ -33,6 +33,23 @@ End Sub
 Public Sub FormatToPrint()
 Attribute FormatToPrint.VB_Description = "Optimize column width and other page settings to print."
 Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
+'
+
+    ' ----- WHAT PAGE SIZES CAN WE USE? -----------------------------------
+    Dim availPageSizes() As Variant
+    ' Add error handling in case no paper sizes returned
+    availPageSizes = GetPaperSizes(thisSheet)
+
+End Sub
+
+' ===== Adjuster ==============================================================
+' A Public function so it can be called from other macros, that perhaps want to
+' send arguments (such as only sending 11x17 page size, if you know the report
+' won't fit on smaller paper and so you don't want to even try those). Returns
+' True if it was successful; if False, returns settings to original.
+
+Public Function Adjuster(PageSizes() As Variant) As Boolean
+
     ' ----- STARTUP -----------------------------------------------------------
     Application.ScreenUpdating = False
     ' Save current selection, to return to at end
@@ -45,6 +62,7 @@ Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
     Dim lngColumns As Long
     Dim lngRows As Long
     Dim rngFitColumns As Range
+    Dim strMessage As String
 
     ' Set range of cells to fit, but not the header row, because often the only
     ' cell in a column with long text is the header
@@ -53,83 +71,140 @@ Attribute FormatToPrint.VB_ProcData.VB_Invoke_Func = "F\n14"
     thisSheet.Cells(1, 1).Activate      ' do count header rows, though
     lngColumns = ActiveCell.End(xlToRight).Column
     lngRows = ActiveCell.End(xlDown).Row
-    Set rngFitColumns = thisSheet.Range(Cells(2, 1), Cells(lngRows, lngColumns))
-
-    ' ----- TRY JUST COLUMN-FIT FUNCTION W/O FORMATTING CHANGES ---------------
-    If FitColumns(rngFitColumns, 1) = False Then
-
-        ' ----- BASIC FORMATTING ----------------------------------------------
-        ' Verdana is a common font that looks good small
-        ' Should add error handling in case it's missing, though
-        rngFitColumns.Font.Name = "Arial"
-        
-        ' Landscape almost always better fit, right?
-        thisSheet.PageSetup.Orientation = xlLandscape
+    Set rngFitColumns = thisSheet.Range(Cells(1, 1), Cells(lngRows, lngColumns))
     
-        ' ----- WHAT PAGE SIZES CAN WE USE? -----------------------------------
-        Dim pageSizes() As Variant
-        ' Add error handling in case no paper sizes returned
-        pageSizes = GetPaperSizes(thisSheet)
+    ' ----- RECORD ORIGINAL SETTINGS --------------------------------------
+    ' Data types per MSDN documentation for each property
+    Dim origFontName As Variant
+    Dim origFontSize As Variant
+    Dim origOrientation As XlPageOrientation
+    Dim origPageWide As Variant
+    Dim origPaperSize As XlPaperSize
+    Dim origLeftMargin As Double
+    Dim origRightMargin As Double
+    Dim origColumnWidths(1 To lngColumns) As Variant
+    Dim Z As Long
     
-        ' ----- MAKE ADJUSTMENTS, TRY TO FIT COLUMNS --------------------------
-        Dim lngPagesWide As Long: lngPagesWide = 0  ' counter for first Do loop
-        Dim lngMargins As Long ' TOTAL L + R margins
-        Dim A As Long, B As Long, C As Long
+    With rngFitColumns
+        For Z = 1 To lngColumns
+            origColumnWidths(Z) = .Cells(1, Z).ColumnWidth
+        Next Z
 
-        Do
-            lngPagesWide = lngPagesWide + 1
-            For B = LBound(pageSizes) To UBound(pageSizes)
-                thisSheet.PageSetup.PaperSize = pageSizes(B)
-                For A = 10 To 4 Step -1
-                    rngFitColumns.Font.Size = A
-                    For C = 1 To 2
-                        lngMargins = Application.InchesToPoints(1 / C)
-                        thisSheet.PageSetup.LeftMargin = lngMargins / 2
-                        thisSheet.PageSetup.RightMargin = lngMargins / 2
-                        blnDone = FitColumns(rngFitColumns, lngPagesWide)
-                        If blnDone = True Then
-                            Exit Do
-                        End If
-                    Next C
-                Next A
-            Next B
-        Loop While lngPagesWide < 4
-        ' 4 pages wide seems like as good a place to give up as any
-
-        ' ----- OTHER PAGE SETUP ----------------------------------------------
-        ' Even if FitColumsn ultimately failed, these settings are still good
-        With thisSheet.PageSetup
-            .BottomMargin = Application.InchesToPoints(0.5)
-            .TopMargin = Application.InchesToPoints(0.5)
-            .CenterHorizontally = True
-            .Zoom = False
-            .FitToPagesTall = False
-            .PrintGridlines = True
-            .PrintTitleRows = thisSheet.Rows(1).Address
-            .CenterFooter = "&C &P"         ' &C for center, &P for page number
-            .FitToPagesWide = lngPagesWide
+        With .Font
+        origFontName = .Name
+        origFontSize = .Size
         End With
-    End If
-    Dim strMessage As String
-    If blnDone = True Then
-        strMessage = "It worked!" & vbNewLine
-    Else
-        strMessage = "Sad face :(" & vbNewLine
-    End If
-    strMessage = strMessage & _
-        "Paper size: " & thisSheet.PageSetup.PaperSize & vbNewLine & _
-        "Margins: " & thisSheet.PageSetup.LeftMargin & vbNewLine & _
-        "Font size: " & rngFitColumns.Font.Size & vbNewLine & _
-        "Pages wide: " & lngPagesWide
-    MsgBox strMessage
+    End With
+    
+    With thisSheet.PageSetup
+        origOrientation = .Orientation
+        origPageWide = .FitToPagesWide
+        origPaperSize = .PaperSize
+        origLeftMargin = .LeftMargin
+        origRightMargin = .RightMargin
+    End With
+
+    
+    ' ----- BASIC FORMATTING ----------------------------------------------
+    ' Arial is a common font that looks good small
+    ' Should add error handling in case it's missing, though
+    rngFitColumns.Font.Name = "Arial"
+    
+    ' Landscape almost always better fit, right?
+    thisSheet.PageSetup.Orientation = xlLandscape
+
+    ' ----- MAKE ADJUSTMENTS, TRY TO FIT COLUMNS --------------------------
+    Dim lngPagesWide As Long: lngPagesWide = 0  ' counter for first Do loop
+    Dim lngMargins As Long ' TOTAL L + R margins
+    Dim A As Long, B As Long, C As Long
+
+    Do
+        lngPagesWide = lngPagesWide + 1
+        thisSheet.PageSetup.FitToPagesWide = lngPagesWide
+        For B = LBound(PageSizes) To UBound(PageSizes)
+            thisSheet.PageSetup.PaperSize = PageSizes(B)
+            For A = 10 To 4 Step -1
+                rngFitColumns.Font.Size = A
+                For C = 1 To 2
+                    lngMargins = Application.InchesToPoints(1 / C)
+                    thisSheet.PageSetup.LeftMargin = lngMargins / 2
+                    thisSheet.PageSetup.RightMargin = lngMargins / 2
+                    blnDone = FitColumns(rngFitColumns, lngPagesWide)
+            ' ===== TESTING ===================================================
+            strMessage = _
+                " === FitColumns: " & blnDone & " ===" & vbNewLine & _
+                "Paper size: " & thisSheet.PageSetup.PaperSize & vbNewLine & _
+                "Margins: " & thisSheet.PageSetup.LeftMargin & vbNewLine & _
+                "Font size: " & rngFitColumns.Font.Size & vbNewLine & _
+                "Pages wide: " & lngPagesWide & vbNewLine & vbNewLine
+'            Debug.Print strMessage
+            ' =================================================================
+                    If blnDone = True Then
+                        Exit Do
+                    End If
+                Next C
+            Next A
+        Next B
+    Loop While lngPagesWide < 4
+    ' 4 pages wide seems like as good a place to give up as any
+
+    ' ----- OTHER PAGE SETUP ----------------------------------------------
+    ' Even if FitColumsn ultimately failed, these settings are still good
+    With thisSheet.PageSetup
+        .PrintArea = rngFitColumns.Address
+        .BottomMargin = Application.InchesToPoints(0.5)
+        .TopMargin = Application.InchesToPoints(0.5)
+        .CenterHorizontally = True
+        .Zoom = False
+        .Order = xlOverThenDown
+        .FitToPagesTall = False
+        .PrintGridlines = True
+        .PrintTitleRows = thisSheet.Rows(1).Address
+        .CenterFooter = "&C &P"         ' &C for center, &P for page number
+    End With
+
+'    ' =========================================================================
+'    '       TESTING
+'    '
+'    If blnDone = True Then
+'        strMessage = "It worked!" & vbNewLine & strMessage
+'    Else
+'        strMessage = "Sad face :(" & vbNewLine & strMessage
+'    End If
+'    MsgBox strMessage
+'    ' =========================================================================
         
     ' ----- FINISH ------------------------------------------------------------
 CleanUp:
-    ' Save current selection to return to at end
+    ' Reset original settings if failed
+    If blnDone = False Then
+        With rngFitColumns
+            Z = 1
+            For Z = 1 To lngColumns
+                .Cells(1, Z).ColumnWidth = origColumnWidths(Z)
+            Next Z
+    
+            With .Font
+                .Name = origFontName
+                .Size = origFontSize
+            End With
+        End With
+        
+        With thisSheet.PageSetup
+            .Orientation = origOrientation
+            .FitToPagesWide = origPageWide
+            .PaperSize = origPaperSize
+            .LeftMargin = origLeftMargin
+            .RightMargin = origRightMargin
+        End With
+    End If
+
     rngStartingSelection.Select
     Application.ScreenUpdating = True
+    
+    Adjuster = blnDone
 
-End Sub
+End Function
 
 ' ===== FitColumns ============================================================
 ' Tries to fit the columns based on the current PageSetup settings. Returns
@@ -151,13 +226,14 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
     Dim rngColumn As Range
     Dim colItem As Variant
     Dim lngColWidth As Long
-    Dim lngMinColumnW As Long: lngMinColumnW = Application.InchesToPoints(1.5)
+    Dim lngMinColumnW As Long: lngMinColumnW = 60
     Dim D As Long, E As Long, F As Long
     Dim dCount As Long: dCount = 0
     Dim rngCheckColumn As Range
     Dim strColumn As String
 
     Set objPageSetup = fitRange.Parent.PageSetup
+    objPageSetup.FitToPagesWide = pagesWide
     lngPageWidth = GetPageWidth(objPageSetup) * pagesWide
     lngSideMargins = objPageSetup.LeftMargin + objPageSetup.RightMargin
     lngAvailWidth = lngPageWidth - lngSideMargins
@@ -166,8 +242,9 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
     ' NOTE: Range.Width property returns points, Range.ColumnWidth returns
     ' number of characters (counted as width of "0")
 
-    ' AutoFit columns and check - maybe that's fine
-    fitRange.Columns.AutoFit
+    ' AutoFit columns (but NOT header row - often only long entry in column)
+    ' Check if auto-fit is enough.
+    fitRange.Offset(1, 0).Columns.AutoFit
     If fitRange.Width > lngAvailWidth Then ' Not fine - try to fit
 
     ' ----- BUILD COLLECTION OF COLUMN RANGES ---------------------------------
@@ -192,7 +269,7 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
                 ' Record current average column width
                 ' Must be multiple of 6, see FUN STORY below
                 lngStartAvgColW = lngAvailWidth / ColumnCollect.Count
-                lngStartAvgColW = lngStartAvgColW - (lngStartAvgColW Mod 6)
+'                lngStartAvgColW = lngStartAvgColW - (lngStartAvgColW Mod 6)
                 
                 ' Remove any columns already smaller than average
                 For Each rngCheckColumn In ColumnCollect
@@ -205,7 +282,7 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
 
                 ' Re-calculate average col width (rm cols already < average)
                 lngAvgColumnW = lngAvailWidth / ColumnCollect.Count
-                lngAvgColumnW = lngAvgColumnW - (lngAvgColumnW Mod 6)
+'                lngAvgColumnW = lngAvgColumnW - (lngAvgColumnW Mod 6)
 
                 ' Check if average is at least as large as the minimum we set
                 If lngAvgColumnW < lngMinColumnW Then
@@ -224,6 +301,8 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
                 End If
             End If
         Loop Until blnStop = True Or dCount = 10
+        ' If can't fit in 10 loops, give up. Could increase, but it already
+        ' takes a while to run and I don't think I've had more than 5 loops...
     Else
         blnSuccess = True
     End If
@@ -259,7 +338,10 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
                     ' abs() in case we want to change stopping test to < 1
                     ' at some point (if need more exact than multiple of 6 pts)
                     differencePoints = Abs(lngAvgColumnW - rngFinalColumn.Width)
-                Loop Until differencePoints = 0 Or B = 10
+                Loop Until differencePoints < 1 Or B = 10
+                If B = 10 Then
+                    Debug.Print "FAIL: fit column: " & differencePoints
+                End If
                 ' B-counter just as a fail-safe to prevent infinite loops,
                 ' though if it can't reach our intended width it will end
                 ' up < 1 point away which isn't such a big deal.
