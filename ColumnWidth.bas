@@ -71,6 +71,7 @@ Public Function Adjuster(PageSizes() As Variant) As Boolean
     lngColumns = ActiveCell.End(xlToRight).Column
     lngRows = ActiveCell.End(xlDown).Row
     Set rngFitColumns = thisSheet.Range(Cells(1, 1), Cells(lngRows, lngColumns))
+    Debug.Print rngFitColumns.Width
     
     ' ----- RECORD ORIGINAL SETTINGS --------------------------------------
     ' Data types per MSDN documentation for each property
@@ -116,19 +117,22 @@ Public Function Adjuster(PageSizes() As Variant) As Boolean
     Dim lngPagesWide As Long: lngPagesWide = 0  ' counter for first Do loop
     Dim lngMargins As Long ' TOTAL L + R margins
     Dim A As Long, B As Long, C As Long
+    Dim currentPaperSize As XlPaperSize
 
     Do
         lngPagesWide = lngPagesWide + 1
         thisSheet.PageSetup.FitToPagesWide = lngPagesWide
         For B = LBound(PageSizes) To UBound(PageSizes)
-            thisSheet.PageSetup.PaperSize = PageSizes(B)
+            currentPaperSize = PageSizes(B)
+            Debug.Print currentPaperSize
+'            thisSheet.PageSetup.PaperSize = PageSizes(B)
             For A = 10 To 4 Step -1
                 rngFitColumns.Font.Size = A
                 For C = 1 To 2
                     lngMargins = Application.InchesToPoints(1 / C)
                     thisSheet.PageSetup.LeftMargin = lngMargins / 2
                     thisSheet.PageSetup.RightMargin = lngMargins / 2
-                    blnDone = FitColumns(rngFitColumns, lngPagesWide)
+                    blnDone = FitColumns(rngFitColumns, lngPagesWide, currentPaperSize)
             ' ===== TESTING ===================================================
             strMessage = _
                 " === FitColumns: " & blnDone & " ===" & vbNewLine & _
@@ -211,7 +215,10 @@ End Function
 ' The range passed to this function should NOT include headers. If successful,
 ' will also autofit rows and wrap text.
 
-Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
+Private Function FitColumns(fitRange As Range, pagesWide As Long, _
+    pageSize As XlPaperSize) As Boolean
+    Debug.Print pageSize
+    
     ' Set up variables
     Dim objPageSetup As PageSetup
     Dim lngPageWidth As Long  ' Full width of print-page in points
@@ -233,7 +240,8 @@ Private Function FitColumns(fitRange As Range, pagesWide As Long) As Boolean
 
     Set objPageSetup = fitRange.Parent.PageSetup
     objPageSetup.FitToPagesWide = pagesWide
-    lngPageWidth = GetPageWidth(objPageSetup) * pagesWide
+'    lngPageWidth = GetPageWidth(objPageSetup) * pagesWide
+    lngPageWidth = GetPageWidth(pageSize) * pagesWide
     lngSideMargins = objPageSetup.LeftMargin + objPageSetup.RightMargin
     lngAvailWidth = lngPageWidth - lngSideMargins
 
@@ -370,45 +378,45 @@ End Function
 ' In which case, note that Application.CentimetersToPoints() exists but does
 ' not return round values, though Long will coerce to integer values.
 
-Private Function GetPageWidth(objOrigPageSetup As PageSetup) As Long
-    ' Get orientation of paper (i.e., which dimension is "wide"
-    Dim currentOrientation As XlPageOrientation
-    currentOrientation = objOrigPageSetup.Orientation
+' ACTUALLY! Printers can have their own paper sizes that aren't documented
+' so we can't rely on these options being the ones available. For now, just
+' returns the actual width for a particular size we WANT, but use will have
+' to set it themselves.
 
+Private Function GetPageWidth(desiredPageSize As Variant) As Long
+    ' Get orientation of paper (i.e., which dimension is "wide"
     Dim currentWidth As Long
-    Select Case objOrigPageSetup.PaperSize
+'    Dim currentOrientation As XlPageOrientation
+'    currentOrientation = objOrigPageSetup.Orientation
+'    objOrigPageSetup.Orientation = xlLandscape
+    
+
+'    Select Case objOrigPageSetup.PaperSize
+    Select Case desiredPageSize
 
         Case xlPaperLetter
-            If currentOrientation = xlLandscape Then
-                currentWidth = Application.InchesToPoints(11)
-            Else
-                currentWidth = Application.InchesToPoints(8.5)
-            End If
-            
+             currentWidth = Application.InchesToPoints(11)
+
+
         Case xlPaperLegal
-            If currentOrientation = xlLandscape Then
-                currentWidth = Application.InchesToPoints(14)
-            Else
-                currentWidth = Application.InchesToPoints(8.5)
-            End If
+             currentWidth = Application.InchesToPoints(14)
 
         Case xlPaperTabloid
-            If currentOrientation = xlLandscape Then
-                currentWidth = Application.InchesToPoints(17)
-            Else
-                currentWidth = Application.InchesToPoints(11)
-            End If
+             currentWidth = Application.InchesToPoints(17)
 
         Case xlPaper11x17
-            If currentOrientation = xlLandscape Then
-                currentWidth = Application.InchesToPoints(17)
-            Else
-                currentWidth = Application.InchesToPoints(11)
-            End If
-            
+             currentWidth = Application.InchesToPoints(17)
+
+        Case xlPaperLedger
+'            If currentOrientation = xlLandscape Then
+'                objOrigPageSetup.Orientation = xlPortrait
+'            End If
+
+            currentWidth = Application.InchesToPoints(17)
+
         Case Else ' some other paper size, just quit everything
             currentWidth = 0
-    
+
     End Select
 
     GetPageWidth = currentWidth
@@ -433,7 +441,7 @@ Private Function GetPaperSizes(getPaperSheet As Worksheet) As Variant
     Dim availSizes() As Variant
     Dim I As Long
     Dim J As Long: J = 0    ' for availSizes index; will be base 1
-    Dim Sizes(1 To 4) As XlPaperSize
+    Dim Sizes(1 To 5) As XlPaperSize
 
     ' Only trying these paper sizes. If wanted to try ALL paper sizes, loop
     ' through numbers 1 to 41. But just because you can set it doesn't mean
@@ -443,6 +451,7 @@ Private Function GetPaperSizes(getPaperSheet As Worksheet) As Variant
     Sizes(2) = xlPaperLegal
     Sizes(3) = xlPaperTabloid
     Sizes(4) = xlPaper11x17
+    Sizes(5) = xlPaperLedger
     
     ' If not available, throws Error 1004: "Unable to set the PaperSize
     ' property of the PageSetup class"
