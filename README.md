@@ -16,3 +16,5 @@ Excel VBA macro to optimize column widths and formatting of reports for printing
 * See if it's possible to return only paper sizes that are currently available on the printer, not that the printer is capable of using.
 * Test if numbers appear as *####* because they don't fit in the column width (specifically ISBN). This is somewhat dependent on View > Zoom level, so may not be possible.
 * Is it possible to better handle columns where only a few values are long, throwing off the .Columns.AutoFit method? Without actually looping through every cell in the sheet.
+
+Version 1.1
